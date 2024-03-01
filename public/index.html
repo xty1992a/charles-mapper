@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <meta name="viewport"
+          content="width=device-width,initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0,user-scalable=no">
+    <script type="text/javascript" src="https://unpkg.com/vue@3.4.19/dist/vue.global.js"></script>
+    <link
+            rel="stylesheet"
+            href="https://fastly.jsdelivr.net/npm/vant@4/lib/index.css"
+    />
+    <script src="https://fastly.jsdelivr.net/npm/vant@4/lib/vant.min.js"></script>
+    <script src="https://unpkg.com/vue-json-pretty@2.3.0/lib/vue-json-pretty.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/vue-json-pretty@2.3.0/lib/styles.css">
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            padding: 16px 0;
+            min-height: 100vh;
+            background-color: #f8f8f8;
+        }
+
+        #app {
+        }
+
+        .block {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+<div>
+<!--    <input type="hidden" id="initialData" value='____data____'>-->
+</div>
+
+<div id="app">
+    <van-empty v-if="!list.length" description="暂无日志"></van-empty>
+    <van-cell-group class="block" inset v-for="item in list" :key="item.eid">
+        <van-cell title="页面" :value="item.pgt"></van-cell>
+        <van-cell title="事件" :value="`${item.ecid}(${item.ebn})`"></van-cell>
+        <van-cell title="描述" :value="item.e"></van-cell>
+        <van-cell title="时间" :value="item.t"></van-cell>
+        <van-collapse v-model="open[item.eid]" accordion>
+            <van-collapse-item title="url" name="url">
+                <p>{{item.url.split('?')[0]}}</p>
+                <vue-json-pretty :data="toParams(item.url)"></vue-json-pretty>
+            </van-collapse-item>
+            <van-collapse-item title="l" name="l">
+                <vue-json-pretty :data="item.l"></vue-json-pretty>
+            </van-collapse-item>
+        </van-collapse>
+        <van-cell title="项目id" :value="item.l.project_id" v-if="item.l.project_id">{{item.l.project_id}}</van-cell>
+
+    </van-cell-group>
+
+</div>
+
+<script>
+    const {createApp, ref, computed} = Vue
+
+    function mkSSE() {
+        class EmitAble {
+            _task = [];
+
+            constructor() {
+                this._task = {};
+            }
+
+            on(event, callback) {
+                this._task[event] = this._task[event] || [];
+                this._task[event].push(callback);
+            }
+
+            fire(event, payload) {
+                const task = this._task[event] || [];
+                task.forEach((callback) => callback(payload));
+            }
+
+            off(event, callback) {
+                const task = this._task[event] || [];
+                this._task[event] = task.filter((cb) => cb !== callback);
+            }
+
+            clear(event) {
+                this._task[event] = null;
+            }
+        }
+
+        const bus = new EmitAble()
+
+        const endpoint = '/api/sse';
+
+        const eventSource = new EventSource(endpoint);
+
+        eventSource.addEventListener('open', event => {
+            console.log('Connected to SSE server');
+            bus.fire('start')
+        });
+
+        eventSource.addEventListener('message', event => {
+            try {
+                console.log('json')
+                bus.fire('json', JSON.parse(event.data))
+            } catch {
+            }
+        });
+
+        eventSource.addEventListener('error', error => {
+            bus.fire('error')
+        });
+
+        return bus
+    }
+
+    const sse = mkSSE()
+
+    function toParams(path) {
+        if (!path.includes('?')) return ''
+        console.log()
+        return Object.fromEntries(new URLSearchParams(path.split('?')[1]))
+    }
+
+    const app = createApp({
+        components: {
+            VueJsonPretty: VueJsonPretty.default
+        },
+        setup() {
+            const data = ref([])
+            const open = ref({})
+            const list = computed(() => [...data.value].reverse())
+
+            fetch('/api/data')
+                .then(r => r.json())
+                .then(res => {
+                    if (res.code) return
+                    if (res.data) {
+                        data.value = res.data
+                        data.value.forEach(n => open.value[n.eid] = [])
+                    }
+                })
+
+            sse.on('json', (json) => {
+                console.log(json)
+                data.value.push(json)
+            })
+
+            return {
+                data,
+                list,
+                open,
+                toParams
+            }
+        }
+    })
+        .use(vant)
+        .use(vant.Lazyload)
+
+    app
+        .mount('#app')
+</script>
+</body>
+</html>
